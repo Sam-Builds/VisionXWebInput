@@ -1,0 +1,25 @@
+services:
+  visionx-webinput:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: visionx-webinput-service
+    restart: unless-stopped
+    ports:
+      - "${WEBINPUT_PORT:-8030}:8080"
+    env_file:
+      - path: /opt/VisionX/secrets/.env.webinput
+        required: false
+      - path: ./.env
+        required: false
+      - path: ./.env.example
+        required: false
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 8080
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

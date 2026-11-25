@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VisionX WebInput — Live Camera to Direct Video URL</title>
+  <style>
+    :root {
+      --bg: #141613;
+      --surface: #1d211c;
+      --surface-2: #252a23;
+      --border: #333a2f;
+      --text: #f7f8f4;
+      --muted: #a3a99b;
+      --sage: #ccd5ae;
+      --bronze: #d4a373;
+      --danger: #c85a54;
+      --success: #588157;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    .container {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 24px 16px 48px;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    .brand {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+    }
+    .brand span { color: var(--bronze); }
+    .subtitle { color: var(--muted); font-size: 13.5px; margin-top: 2px; }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: 12.5px;
+      font-weight: 600;
+      background: var(--surface);
+      border: 1px solid var(--border);
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+    }
+    .dot.live { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+    .grid {
+      display: grid;
+      grid-template-columns: 1.4fr 1fr;
+      gap: 20px;
+    }
+    @media (max-width: 820px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 18px;
+    }
+    video {
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      background: #0b0c0a;
+      border-radius: 12px;
+      object-fit: cover;
+      border: 1px solid var(--border);
+    }
+    label {
+      display: block;
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 6px;
+      margin-top: 12px;
+    }
+    select, input[type="text"] {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-size: 13.5px;
+    }
+    .row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin-top: 14px;
+    }
+    .btn {
+      cursor: pointer;
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      color: var(--text);
+      padding: 10px 16px;
+      border-radius: 10px;
+      font-size: 13.5px;
+      font-weight: 600;
+      transition: opacity 0.15s;
+    }
+    .btn:hover { opacity: 0.9; }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-primary {
+      background: var(--bronze);
+      color: #1c1813;
+      border-color: var(--bronze);
+    }
+    .btn-danger {
+      background: var(--danger);
+      color: #fff;
+      border-color: var(--danger);
+    }
+    .url-box {
+      margin-top: 14px;
+      padding: 12px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+    }
+    .url-label {
+      font-size: 11.5px;
+      color: var(--sage);
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    .url-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .url-input {
+      flex: 1;
+      font-family: monospace;
+      font-size: 12px;
+      background: #141613;
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+    .stats {
+      display: flex;
+      gap: 16px;
+      margin-top: 12px;
+      font-size: 12.5px;
+      color: var(--muted);
+    }
+    .streams-list {
+      margin-top: 24px;
+    }
+    .stream-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      padding: 12px 14px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      margin-top: 10px;
+    }
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 12px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div>
+        <div class="brand">Vision<span>X</span> WebInput</div>
+        <div class="subtitle">Capture camera or screen input from any device and get a direct shareable video URL.</div>
+      </div>
+      <div class="badge">
+        <span id="statusDot" class="dot"></span>
+        <span id="statusText">Idle</span>
+      </div>
+    </header>
+
+    <div class="grid">
+      <div class="card">
+        <video id="preview" autoplay muted playsinline></video>
+        <div class="row">
+          <button id="btnStartCam" class="btn btn-primary" style="flex:1;">Start Camera Broadcast</button>
+          <button id="btnStartScreen" class="btn">Share Screen</button>
+          <button id="btnStop" class="btn btn-danger" style="display:none;">Stop Broadcast</button>
+        </div>
+        <div id="liveUrls" style="display:none;">
+          <div class="url-box">
+            <div class="url-label">DIRECT VIDEO URL (VLC / &lt;video&gt; / OpenCV / Share)</div>
+            <div class="url-row">
+              <input id="directUrl" class="url-input" readonly />
+              <button class="btn" onclick="copyField('directUrl')">Copy</button>
+            </div>
+          </div>
+          <div class="url-box">
+            <div class="url-label">SHAREABLE WATCH PAGE</div>
+            <div class="url-row">
+              <input id="watchUrl" class="url-input" readonly />
+              <button class="btn" onclick="copyField('watchUrl')">Copy</button>
+              <a id="openWatch" class="btn" target="_blank" style="text-decoration:none;">Open</a>
+            </div>
+          </div>
+          <div class="stats">
+            <span>Viewers: <strong id="viewerCount">0</strong></span>
+            <span>Uploaded: <strong id="bytesSent">0 KB</strong></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 style="margin:0 0 8px; font-size:16px;">Input Configuration</h3>
+
+        <label for="cameraSelect">Camera Device</label>
+        <select id="cameraSelect">
+          <option value="">Default Camera</option>
+        </select>
+
+        <label for="resolutionSelect">Resolution</label>
+        <select id="resolutionSelect">
+          <option value="1280x720" selected>720p HD (1280x720)</option>
+          <option value="1920x1080">1080p Full HD (1920x1080)</option>
+          <option value="640x480">480p SD (640x480)</option>
+        </select>
+
+        <label for="streamTitle">Stream Title</label>
+        <input id="streamTitle" type="text" placeholder="e.g. Entrance Camera 1" value="Live Camera" />
+
+        <label for="customId">Custom Stream ID (Optional)</label>
+        <input id="customId" type="text" placeholder="Auto-generated if empty" />
+
+        <div class="checkbox-row">
+          <input id="includeAudio" type="checkbox" />
+          <label for="includeAudio" style="margin:0; cursor:pointer;">Include Microphone Audio</label>
+        </div>
+
+        <div class="row" style="margin-top:16px;">
+          <button id="btnRefreshDevices" class="btn" style="width:100%;">Refresh Camera Devices</button>
+        </div>
+        <p id="errorBox" style="color:var(--danger); font-size:12.5px; margin-top:10px;"></p>
+      </div>
+    </div>
+
+    <div class="card streams-list">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h3 style="margin:0; font-size:15.5px;">Active Live Streams</h3>
+        <button class="btn" onclick="refreshStreams()" style="padding:6px 12px; font-size:12px;">Refresh</button>
+      </div>
+      <div id="streamsContainer" style="margin-top:10px; color:var(--muted); font-size:13px;">Loading...</div>
+    </div>
+  </div>
+
+  <script>
+    const preview = document.getElementById('preview');
+    const cameraSelect = document.getElementById('cameraSelect');
+    const resolutionSelect = document.getElementById('resolutionSelect');
+    const streamTitleInput = document.getElementById('streamTitle');
+    const customIdInput = document.getElementById('customId');
+    const includeAudioCheckbox = document.getElementById('includeAudio');
+    const btnStartCam = document.getElementById('btnStartCam');
+    const btnStartScreen = document.getElementById('btnStartScreen');
+    const btnStop = document.getElementById('btnStop');
+    const btnRefreshDevices = document.getElementById('btnRefreshDevices');
+    const statusDot = document.getElementById('statusDot');
+    const statusText = document.getElementById('statusText');
+    const liveUrls = document.getElementById('liveUrls');
+    const directUrlInput = document.getElementById('directUrl');
+    const watchUrlInput = document.getElementById('watchUrl');
+    const openWatchLink = document.getElementById('openWatch');
+    const viewerCountEl = document.getElementById('viewerCount');
+    const bytesSentEl = document.getElementById('bytesSent');
+    const errorBox = document.getElementById('errorBox');
+
+    let mediaStream = null;
+    let recorder = null;
+    let ws = null;
+    let pingTimer = null;
+    let totalBytes = 0;
+
+    // Resolve base path cleanly for both root and subpath proxy (/webinput)
+    const basePath = window.location.pathname.replace(/\/+$/, '');
+    const baseHttpUrl = `${window.location.origin}${basePath}`;
+    const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const baseWsUrl = `${wsProto}//${window.location.host}${basePath}`;
+
+    async function loadCameras() {
+      try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videoInputs = devices.filter(d => d.kind === 'videoinput');
+        const current = cameraSelect.value;
+        cameraSelect.innerHTML = '<option value="">Default Camera</option>';
+        videoInputs.forEach((d, idx) => {
+          const opt = document.createElement('option');
+          opt.value = d.deviceId;
+          opt.textContent = d.label || `Camera ${idx + 1}`;
+          cameraSelect.appendChild(opt);
+        });
+        if (current) cameraSelect.value = current;
+      } catch (err) {
+        console.warn('Could not enumerate devices:', err);
+      }
+    }
+
+    function pickMimeType() {
+      const candidates = [
+        'video/webm;codecs=vp8,opus',
+        'video/webm;codecs=vp8',
+        'video/webm;codecs=vp9',
+        'video/webm',
+        'video/mp4'
+      ];
+      for (const m of candidates) {
+        if (window.MediaRecorder && MediaRecorder.isTypeSupported(m)) return m;
+      }
+      return 'video/webm';
+    }
+
+    async function startBroadcast(useScreen = false) {
+      errorBox.textContent = '';
+      stopBroadcast();
+
+      const [w, h] = resolutionSelect.value.split('x').map(Number);
+      const includeAudio = includeAudioCheckbox.checked;
+
+      try {
+        if (useScreen) {
+          mediaStream = await navigator.mediaDevices.getDisplayMedia({
+            video: { width: w, height: h },
+            audio: includeAudio
+          });
+        } else {
+          const deviceId = cameraSelect.value;
+          mediaStream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+              width: { ideal: w },
+              height: { ideal: h }
+            },
+            audio: includeAudio
+          });
+          await loadCameras();
+        }
+      } catch (err) {
+        errorBox.textContent = `Camera/Input error: ${err.message}`;
+        return;
+      }
+
+      preview.srcObject = mediaStream;
+      const mimeType = pickMimeType();
+      const params = new URLSearchParams({
+        title: streamTitleInput.value.trim() || 'Live Camera',
+        mimeType: mimeType.split(';')[0]
+      });
+      if (customIdInput.value.trim()) {
+        params.set('id', customIdInput.value.trim());
+      }
+
+      ws = new WebSocket(`${baseWsUrl}/ws/broadcast?${params.toString()}`);
+      ws.binaryType = 'arraybuffer';
+
+      ws.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === 'ready') {
+            const dUrl = `${baseHttpUrl}${msg.streamPath}`;
+            const wUrl = `${baseHttpUrl}${msg.watchPath}`;
+            directUrlInput.value = dUrl;
+            watchUrlInput.value = wUrl;
+            openWatchLink.href = wUrl;
+            liveUrls.style.display = 'block';
+            statusDot.classList.add('live');
+            statusText.textContent = `Live (${msg.streamId})`;
+            btnStartCam.style.display = 'none';
+            btnStartScreen.style.display = 'none';
+            btnStop.style.display = 'inline-block';
+            refreshStreams();
+          } else if (msg.type === 'pong') {
+            viewerCountEl.textContent = msg.viewers;
+          }
+        } catch {}
+      };
+
+      ws.onopen = () => {
+        totalBytes = 0;
+        recorder = new MediaRecorder(mediaStream, { mimeType });
+        recorder.ondataavailable = async (e) => {
+          if (e.data && e.data.size > 0 && ws && ws.readyState === WebSocket.OPEN) {
+            const buf = await e.data.arrayBuffer();
+            ws.send(buf);
+            totalBytes += buf.byteLength;
+            bytesSentEl.textContent = totalBytes > 1048576
+              ? `${(totalBytes / 1048576).toFixed(2)} MB`
+              : `${(totalBytes / 1024).toFixed(1)} KB`;
+          }
+        };
+        recorder.start(400);
+        pingTimer = setInterval(() => {
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'ping' }));
+          }
+        }, 2000);
+      };
+
+      ws.onclose = () => {
+        if (recorder && recorder.state !== 'inactive') stopBroadcast();
+      };
+    }
+
+    function stopBroadcast() {
+      if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
+      if (recorder && recorder.state !== 'inactive') {
+        try { recorder.stop(); } catch {}
+      }
+      recorder = null;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.close();
+      }
+      ws = null;
+      if (mediaStream) {
+        mediaStream.getTracks().forEach(t => t.stop());
+        mediaStream = null;
+      }
+      preview.srcObject = null;
+      statusDot.classList.remove('live');
+      statusText.textContent = 'Idle';
+      liveUrls.style.display = 'none';
+      btnStartCam.style.display = 'inline-block';
+      btnStartScreen.style.display = 'inline-block';
+      btnStop.style.display = 'none';
+      refreshStreams();
+    }
+
+    function copyField(id) {
+      const el = document.getElementById(id);
+      navigator.clipboard.writeText(el.value);
+    }
+
+    async function refreshStreams() {
+      const container = document.getElementById('streamsContainer');
+      try {
+        const res = await fetch(`${baseHttpUrl}/api/streams`);
+        const data = await res.json();
+        if (!data.streams || data.streams.length === 0) {
+          container.innerHTML = 'No active broadcasts right now.';
+          return;
+        }
+        container.innerHTML = data.streams.map(s => `
+          <div class="stream-item">
+            <div>
+              <strong>${s.title}</strong> <span style="color:var(--muted); font-size:12px;">(${s.id} • ${s.viewers} viewer${s.viewers === 1 ? '' : 's'})</span>
+              <div style="font-family:monospace; font-size:11.5px; color:var(--sage); margin-top:2px;">${s.directVideoUrl}</div>
+            </div>
+            <div style="display:flex; gap:8px;">
+              <button class="btn" onclick="navigator.clipboard.writeText('${s.directVideoUrl}')" style="padding:6px 10px; font-size:12px;">Copy Video URL</button>
+              <a class="btn btn-primary" href="${s.watchUrl}" target="_blank" style="padding:6px 10px; font-size:12px; text-decoration:none;">Watch</a>
+            </div>
+          </div>
+        `).join('');
+      } catch {
+        container.textContent = 'Could not load active streams.';
+      }
+    }
+
+    btnStartCam.addEventListener('click', () => startBroadcast(false));
+    btnStartScreen.addEventListener('click', () => startBroadcast(true));
+    btnStop.addEventListener('click', stopBroadcast);
+    btnRefreshDevices.addEventListener('click', loadCameras);
+
+    loadCameras();
+    refreshStreams();
+    setInterval(refreshStreams, 5000);
+  </script>
+</body>
+</html>

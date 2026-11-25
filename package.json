@@ -1,0 +1,14 @@
+{
+  "name": "visionx-webinput",
+  "version": "1.0.0",
+  "description": "VisionX WebInput - Capture camera input from any device and expose a direct shareable video stream URL.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/server.test.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "ws": "^8.18.0"
+  }
+}
