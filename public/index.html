@@ -302,7 +302,18 @@
     let recorder = null;
     let ws = null;
     let pingTimer = null;
+    let frameTimer = null;
+    let frameInFlight = false;
     let totalBytes = 0;
+
+    const TARGET_LIVE_FPS = 10;
+    const TARGET_WIDTH = 640;
+    const TARGET_HEIGHT = 480;
+    const MAX_WS_BACKLOG_BYTES = 512 * 1024;
+    const captureCanvas = document.createElement('canvas');
+    captureCanvas.width = TARGET_WIDTH;
+    captureCanvas.height = TARGET_HEIGHT;
+    const captureCtx = captureCanvas.getContext('2d');
 
     // Resolve base path cleanly for both root and subpath proxy (/webinput)
     const basePath = window.location.pathname.replace(/\/+$/, '');
@@ -377,7 +388,11 @@
       const mimeType = pickMimeType();
       const params = new URLSearchParams({
         title: streamTitleInput.value.trim() || 'Live Camera',
-        mimeType: mimeType.split(';')[0]
+        mimeType: mimeType.split(';')[0],
+        fps: String(TARGET_LIVE_FPS),
+        width: String(TARGET_WIDTH),
+        height: String(TARGET_HEIGHT),
+        maxPending: '1'
       });
       if (customIdInput.value.trim()) {
         params.set('id', customIdInput.value.trim());
@@ -422,6 +437,33 @@
           }
         };
         recorder.start(400);
+
+        // Low-latency latest-frame loop (resized JPEG + captureTs) with backpressure skipping
+        frameTimer = setInterval(() => {
+          if (frameInFlight || !ws || ws.readyState !== WebSocket.OPEN) return;
+          if (ws.bufferedAmount > MAX_WS_BACKLOG_BYTES) return; // skip frame if network is congested
+          if (preview.readyState < 2) return;
+
+          frameInFlight = true;
+          const captureTs = Date.now();
+          captureCtx.drawImage(preview, 0, 0, TARGET_WIDTH, TARGET_HEIGHT);
+          captureCanvas.toBlob(async (blob) => {
+            try {
+              if (!blob || !ws || ws.readyState !== WebSocket.OPEN) return;
+              const jpegBuf = await blob.arrayBuffer();
+              const packet = new Uint8Array(9 + jpegBuf.byteLength);
+              const view = new DataView(packet.buffer);
+              view.setUint8(0, 0x01);
+              view.setFloat64(1, captureTs, false);
+              packet.set(new Uint8Array(jpegBuf), 9);
+              ws.send(packet.buffer);
+              totalBytes += packet.byteLength;
+            } finally {
+              frameInFlight = false;
+            }
+          }, 'image/jpeg', 0.72);
+        }, Math.round(1000 / TARGET_LIVE_FPS));
+
         pingTimer = setInterval(() => {
           if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: 'ping' }));
@@ -436,6 +478,8 @@
 
     function stopBroadcast() {
       if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
+      if (frameTimer) { clearInterval(frameTimer); frameTimer = null; }
+      frameInFlight = false;
       if (recorder && recorder.state !== 'inactive') {
         try { recorder.stop(); } catch {}
       }

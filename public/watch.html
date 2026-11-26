@@ -17,17 +17,64 @@
     main {
       flex: 1;
       display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
-      padding: 20px;
+      padding: 18px;
+      gap: 12px;
     }
-    video {
+    .stage {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
       max-width: 100%;
-      max-height: 82vh;
+    }
+    canvas, video {
+      max-width: 100%;
+      max-height: 78vh;
       border-radius: 12px;
       background: #000;
       border: 1px solid #333a2f;
     }
+    .live-pill {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      background: rgba(15, 17, 15, 0.78);
+      border: 1px solid #333a2f;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #9ca3af;
+    }
+    .dot.live { background: #22c55e; box-shadow: 0 0 8px rgba(34, 197, 94, 0.7); }
+    .dot.reconnecting { background: #f59e0b; }
+    .dot.disconnected { background: #ef4444; }
+    .diag-panel {
+      width: 100%;
+      max-width: 900px;
+      background: #1b1f1a;
+      border: 1px solid #2c3228;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-family: monospace;
+      font-size: 12px;
+      color: #ccd5ae;
+      display: none;
+      flex-wrap: wrap;
+      gap: 14px;
+    }
+    .diag-panel.open { display: flex; }
     footer {
       padding: 14px 24px;
       background: #1d211c;
@@ -54,29 +101,167 @@
 </head>
 <body>
   <main>
-    <video id="player" controls autoplay playsinline></video>
+    <div class="stage">
+      <canvas id="liveCanvas" width="640" height="480"></canvas>
+      <video id="player" controls autoplay muted playsinline style="display:none;"></video>
+      <div class="live-pill">
+        <span id="statusDot" class="dot"></span>
+        <span id="statusLabel">Connecting</span>
+      </div>
+    </div>
+
+    <div id="diagPanel" class="diag-panel">
+      <span>Capture FPS: <strong id="dCapFps">-</strong></span>
+      <span>Render FPS: <strong id="dRenFps">-</strong></span>
+      <span>Latency: <strong id="dLatency">-</strong></span>
+      <span>Frame Age: <strong id="dAge">-</strong></span>
+      <span>Skipped: <strong id="dSkipped">0</strong></span>
+      <span>Processed: <strong id="dProcessed">0</strong></span>
+      <span>Buffer: <strong id="dBuffer">0</strong></span>
+    </div>
   </main>
+
   <footer>
     <div>
       <span style="font-weight:700;">Live Stream</span>
       <span id="directLabel" class="url" style="margin-left:10px;"></span>
     </div>
-    <div style="display:flex; gap:10px;">
+    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+      <button id="diagToggle" class="btn">Diagnostics</button>
       <button id="copyBtn" class="btn">Copy Direct Video URL</button>
       <a id="backBtn" class="btn" href="../">Broadcast Page</a>
     </div>
   </footer>
+
   <script>
     const parts = window.location.pathname.replace(/\/+$/, '').split('/');
     const streamId = parts[parts.length - 1];
     const base = window.location.pathname.replace(/\/watch\/[^/]+\/?$/, '');
     const streamUrl = `${window.location.origin}${base}/stream/${streamId}`;
+    const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${wsProto}//${window.location.host}${base}/ws/watch/${streamId}`;
 
+    const canvas = document.getElementById('liveCanvas');
+    const ctx = canvas.getContext('2d');
     const player = document.getElementById('player');
-    player.src = streamUrl;
+    const statusDot = document.getElementById('statusDot');
+    const statusLabel = document.getElementById('statusLabel');
+    const diagPanel = document.getElementById('diagPanel');
+
     document.getElementById('directLabel').textContent = streamUrl;
     document.getElementById('backBtn').href = `${base || '/'}`;
     document.getElementById('copyBtn').onclick = () => navigator.clipboard.writeText(streamUrl);
+    document.getElementById('diagToggle').onclick = () => diagPanel.classList.toggle('open');
+
+    let ws = null;
+    let reconnectAttempt = 0;
+    let lastFrameArrivalAt = 0;
+    let isRendering = false;
+    let pendingBlob = null;
+    let pendingCaptureTs = 0;
+    const renderTimes = [];
+
+    function setConnStatus(state) {
+      statusLabel.textContent = state;
+      statusDot.className = 'dot ' + state.toLowerCase();
+    }
+
+    function computeRenderFps(now) {
+      const cutoff = now - 5000;
+      while (renderTimes.length > 0 && renderTimes[0] < cutoff) renderTimes.shift();
+      if (renderTimes.length < 2) return renderTimes.length;
+      const span = Math.max(0.25, (renderTimes[renderTimes.length - 1] - renderTimes[0]) / 1000);
+      return ((renderTimes.length - 1) / span).toFixed(1);
+    }
+
+    async function renderLatestFrame() {
+      if (isRendering || !pendingBlob) return;
+      isRendering = true;
+      const blob = pendingBlob;
+      const captureTs = pendingCaptureTs;
+      pendingBlob = null; // drop intermediate frames immediately
+
+      try {
+        const bitmap = await createImageBitmap(blob);
+        if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+          canvas.width = bitmap.width;
+          canvas.height = bitmap.height;
+        }
+        ctx.drawImage(bitmap, 0, 0);
+        bitmap.close();
+
+        const now = Date.now();
+        lastFrameArrivalAt = now;
+        renderTimes.push(now);
+        setConnStatus('Live');
+
+        document.getElementById('dRenFps').textContent = computeRenderFps(now);
+        if (captureTs > 0) {
+          document.getElementById('dLatency').textContent = `${Math.max(0, now - captureTs)} ms`;
+        }
+      } catch (_) {
+      } finally {
+        isRendering = false;
+        if (pendingBlob) renderLatestFrame();
+      }
+    }
+
+    function connectLiveSocket() {
+      setConnStatus(reconnectAttempt > 0 ? 'Reconnecting' : 'Connecting');
+      pendingBlob = null; // clear any stale frame on reconnect
+
+      ws = new WebSocket(wsUrl);
+      ws.binaryType = 'arraybuffer';
+
+      ws.onopen = () => {
+        reconnectAttempt = 0;
+      };
+
+      ws.onmessage = (ev) => {
+        if (typeof ev.data === 'string') {
+          try {
+            const msg = JSON.parse(ev.data);
+            if (msg.metrics) {
+              const m = msg.metrics;
+              document.getElementById('dCapFps').textContent = m.captureFps ?? '-';
+              document.getElementById('dAge').textContent = `${m.frameAgeMs ?? 0} ms`;
+              document.getElementById('dSkipped').textContent = m.skippedFrames ?? 0;
+              document.getElementById('dProcessed').textContent = m.processedFrames ?? 0;
+              document.getElementById('dBuffer').textContent = m.bufferSize ?? 0;
+              if (m.status && m.status !== 'Live') setConnStatus(m.status);
+            }
+          } catch {}
+          return;
+        }
+
+        const buf = ev.data;
+        if (buf.byteLength <= 9) return;
+        const view = new DataView(buf);
+        if (view.getUint8(0) !== 0x01) return;
+
+        pendingCaptureTs = view.getFloat64(1, false);
+        pendingBlob = new Blob([buf.slice(9)], { type: 'image/jpeg' });
+        renderLatestFrame();
+      };
+
+      ws.onclose = () => {
+        setConnStatus('Disconnected');
+        reconnectAttempt += 1;
+        const delay = Math.min(5000, 400 * Math.pow(1.5, Math.min(reconnectAttempt, 6)));
+        setTimeout(connectLiveSocket, delay);
+      };
+    }
+
+    // Stale-frame watchdog: never claim Live if frames stopped arriving
+    setInterval(() => {
+      if (lastFrameArrivalAt > 0 && Date.now() - lastFrameArrivalAt > 4000) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          setConnStatus('Reconnecting');
+        }
+      }
+    }, 1000);
+
+    connectLiveSocket();
   </script>
 </body>
 </html>
