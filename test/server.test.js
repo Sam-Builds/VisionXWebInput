@@ -111,6 +111,22 @@ async function runTests() {
     const notFoundRes = await fetch(`${baseUrl}/stream/testcam`);
     assert.strictEqual(notFoundRes.status, 404);
 
+    // 10. Verify /api/test-videos discovers videos in root testvids/ and /api/test-videos/:filename supports Range requests
+    const vidsRes = await fetch(`${baseUrl}/api/test-videos`);
+    assert.strictEqual(vidsRes.status, 200);
+    const vidsJson = await vidsRes.json();
+    assert.ok(Array.isArray(vidsJson.videos) && vidsJson.videos.length > 0, 'Expected testvids/ to contain at least one video');
+
+    const firstVideo = vidsJson.videos[0];
+    const rangeRes = await fetch(`${baseUrl}${firstVideo.url}`, { headers: { Range: 'bytes=0-1023' } });
+    assert.strictEqual(rangeRes.status, 206);
+    const rangeBuf = await rangeRes.arrayBuffer();
+    assert.strictEqual(rangeBuf.byteLength, 1024);
+
+    // 11. Verify path traversal is rejected
+    const badRes = await fetch(`${baseUrl}/api/test-videos/..%2Fserver.js`);
+    assert.strictEqual(badRes.status, 400);
+
     console.log('All WebInput low-latency live-feed tests passed!');
   } finally {
     server.close();
