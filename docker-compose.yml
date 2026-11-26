@@ -17,9 +17,6 @@ services:
     environment:
       NODE_ENV: ${NODE_ENV:-production}
       PORT: 8080
-      TEST_VIDEOS_DIR: ${TEST_VIDEOS_DIR:-/app/testvids}
-    volumes:
-      - ../testvids:/app/testvids:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
       interval: 15s

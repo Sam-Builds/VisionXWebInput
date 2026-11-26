@@ -1,5 +1,4 @@
 const express = require('express');
-const fs = require('fs');
 const http = require('http');
 const path = require('path');
 const crypto = require('crypto');
@@ -22,17 +21,6 @@ const DEFAULT_CONFIG = {
 
 const FRAME_MAGIC = 0x01; // Binary live-frame packet: [0x01][8-byte float64BE captureTs][JPEG bytes]
 const MAX_WS_BUFFERED_BYTES = 256 * 1024;
-const TEST_VIDEOS_DIR = path.resolve(
-  process.env.TEST_VIDEOS_DIR || path.join(__dirname, '..', 'testvids')
-);
-const SUPPORTED_VIDEO_EXTENSIONS = new Map([
-  ['.mp4', 'video/mp4'],
-  ['.webm', 'video/webm'],
-  ['.mov', 'video/quicktime'],
-  ['.m4v', 'video/x-m4v'],
-  ['.mkv', 'video/x-matroska'],
-  ['.avi', 'video/x-msvideo'],
-]);
 
 // Trust reverse proxy headers (Cloudflare Tunnel / Nginx)
 app.set('trust proxy', true);
@@ -215,105 +203,6 @@ app.get('/health', (req, res) => {
     defaults: DEFAULT_CONFIG,
     timestamp: new Date().toISOString(),
   });
-});
-
-// Discover available test videos from root testvids/ directory
-app.get('/api/test-videos', async (req, res) => {
-  try {
-    const entries = await fs.promises.readdir(TEST_VIDEOS_DIR, { withFileTypes: true });
-    const prefix = req.basePrefix || '';
-    const videos = entries
-      .filter((entry) => {
-        if (!entry.isFile() || entry.name.startsWith('.')) return false;
-        const ext = path.extname(entry.name).toLowerCase();
-        return SUPPORTED_VIDEO_EXTENSIONS.has(ext);
-      })
-      .map((entry) => ({
-        filename: entry.name,
-        url: `${prefix}/api/test-videos/${encodeURIComponent(entry.name)}`,
-      }))
-      .sort((a, b) => a.filename.localeCompare(b.filename));
-
-    if (videos.length === 0) {
-      return res.json({
-        videos: [],
-        message: 'No supported test videos found in testvids/.',
-      });
-    }
-
-    return res.json({ videos });
-  } catch (err) {
-    if (err && (err.code === 'ENOENT' || err.code === 'EACCES')) {
-      return res.status(404).json({
-        error: 'Test video directory is missing or inaccessible.',
-        videos: [],
-      });
-    }
-    return res.status(500).json({
-      error: 'Failed to list test videos.',
-      videos: [],
-    });
-  }
-});
-
-// Incrementally stream a test video from testvids/ with HTTP Range support
-app.get('/api/test-videos/:filename', async (req, res) => {
-  const rawName = String(req.params.filename || '');
-  const safeName = path.basename(rawName);
-  const ext = path.extname(safeName).toLowerCase();
-  const contentType = SUPPORTED_VIDEO_EXTENSIONS.get(ext);
-
-  if (!safeName || safeName !== rawName || safeName.startsWith('.') || !contentType) {
-    return res.status(400).json({ error: 'Invalid test video filename.' });
-  }
-
-  const resolvedPath = path.resolve(TEST_VIDEOS_DIR, safeName);
-  if (!resolvedPath.startsWith(TEST_VIDEOS_DIR + path.sep)) {
-    return res.status(403).json({ error: 'Access denied.' });
-  }
-
-  let stat;
-  try {
-    stat = await fs.promises.stat(resolvedPath);
-    if (!stat.isFile()) {
-      return res.status(404).json({ error: 'Test video not found.' });
-    }
-  } catch {
-    return res.status(404).json({ error: 'Test video not found.' });
-  }
-
-  const fileSize = stat.size;
-  const range = req.headers.range;
-
-  if (range) {
-    const match = /^bytes=(\d*)-(\d*)$/.exec(range.trim());
-    if (!match) {
-      return res.status(416).set('Content-Range', `bytes */${fileSize}`).end();
-    }
-    const start = match[1] ? parseInt(match[1], 10) : 0;
-    const end = match[2] ? Math.min(parseInt(match[2], 10), fileSize - 1) : fileSize - 1;
-    if (Number.isNaN(start) || Number.isNaN(end) || start > end || start >= fileSize) {
-      return res.status(416).set('Content-Range', `bytes */${fileSize}`).end();
-    }
-
-    res.writeHead(206, {
-      'Content-Range': `bytes ${start}-${end}/${fileSize}`,
-      'Accept-Ranges': 'bytes',
-      'Content-Length': end - start + 1,
-      'Content-Type': contentType,
-      'Cache-Control': 'no-store',
-    });
-    fs.createReadStream(resolvedPath, { start, end }).pipe(res);
-    return;
-  }
-
-  res.writeHead(200, {
-    'Accept-Ranges': 'bytes',
-    'Content-Length': fileSize,
-    'Content-Type': contentType,
-    'Cache-Control': 'no-store',
-  });
-  fs.createReadStream(resolvedPath).pipe(res);
 });
 
 // List active streams with live metrics
